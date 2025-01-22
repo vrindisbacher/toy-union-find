@@ -70,7 +70,8 @@ executable unionfind
     build-depends:   
         base ^>=4.17.2.1,
         unordered-containers,
-        mtl
+        mtl,
+        hashable
 
     -- Directories containing source files.
     hs-source-dirs:   app

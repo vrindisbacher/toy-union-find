@@ -1,18 +1,25 @@
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric      #-}
+
 module Union where
 
 import qualified Control.Monad
 import Data.HashMap.Strict hiding (union)
+import Data.Hashable
 import Prelude hiding (lookup)
+import GHC.Generics
 
 data UnificationTable a = UnificationTable { values :: [a], unifToIdxMap :: HashMap a Int }
 
-class UnifyKey a where
-    eq :: a -> a -> Bool
+{-# LANGUAGE FlexibleInstances #-}
+
+
+class (Eq a, Hashable a, Show a) => UnifyKey a where
     unify :: a -> a -> a
     rank :: a -> Int
 
-getIdx :: a -> HashMap a Int -> Int
-getIdx val map = case lookup val map of 
+getIdx :: (UnifyKey a) => a -> HashMap a Int -> Int
+getIdx val idxMap = case lookup val idxMap of 
     Nothing -> error ("Could not find val in idx map " ++ show val)
     Just idx -> idx
 
@@ -25,14 +32,14 @@ newKey value table =
     UnificationTable { values = values table ++ [value], unifToIdxMap = insert value idx (unifToIdxMap table) }
 
 find :: UnifyKey a => a -> UnificationTable a -> a
-find x table = let rep = values table !! (getIdx x (unifToIdxMap table))  in 
-        if eq rep x then x else find rep table
+find x table = let rep = values table !! getIdx x (unifToIdxMap table) in 
+        if rep == x then x else find rep table
 
 union :: UnifyKey a  => a -> a -> UnificationTable a -> UnificationTable a
 union x y table =
     let x_rep = find x table in
     let y_rep = find y table in
-    if eq x_rep y_rep then table else
+    if x_rep == y_rep then table else
     let combined = unify x_rep y_rep in
     let x_rank = rank x_rep in
     let y_rank = rank y_rep in
@@ -51,12 +58,11 @@ union x y table =
         let new_values = first ++ (y_rep : tail scd) in
         let y_idx = getIdx y_rep (unifToIdxMap table) in
         let (first_y, scd_y) = splitAt y_idx new_values in
-        UnificationTable { values = first_x ++ (combined : tail scd_x), unifToIdxMap = unifToIdxMap table }
+        UnificationTable { values = first_y ++ (combined : tail scd_y), unifToIdxMap = unifToIdxMap table }
 
-newtype TestKey = TestKey Int deriving (Eq, Show)
+newtype TestKey = TestKey Int deriving (Eq, Show, Generic, Hashable)
 
 instance UnifyKey TestKey where
-    eq (TestKey i) (TestKey j) = i == j
     unify (TestKey i) (TestKey j) = TestKey (min i j)
     rank (TestKey i) = i
 

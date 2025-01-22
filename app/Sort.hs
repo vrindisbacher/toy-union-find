@@ -1,11 +1,17 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric      #-}
+
 module Sort where
 
 import Expr (Expr (..))
 import Data.HashMap.Strict
+import GHC.Generics (Generic)
+import Data.Hashable (Hashable)
+-- import Data.Hashable
 import Data.IORef
-import Control.Monad.State hiding (state)
-import Union (UnifyKey)
+import Control.Monad.State
+    ( MonadIO(liftIO), StateT, evalStateT, MonadState(put, get) )
 
 data Sort =
     SInt
@@ -13,7 +19,7 @@ data Sort =
     | SFunc Sort Sort
     -- free type variable (e.g. one that must be unified)
     | SFVar Int
-    deriving (Show, Eq)
+    deriving (Show, Eq, Generic, Hashable) 
 
 -- hindley milner type checking
 
