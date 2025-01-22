@@ -47,7 +47,6 @@ unifyReps x y newVal table =
     let rank_x = rank x in
     let rank_y = rank y in 
     if rank_x > rank_y then 
-        -- point b to a and set a to new
         redirectRep rank_x (parent x) (parent y) newVal table
     else if rank_x < rank_y then 
         redirectRep rank_y (parent x) (parent y) newVal table

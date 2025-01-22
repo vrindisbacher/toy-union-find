@@ -285,7 +285,6 @@ typeCheckExprUF (ELam s body) = do
     -- create input sort and bind it in the env
     sInArgExpected <- SFVarUF <$> applyUnionTuple f (sortUnif state)
     put state { envUF = insert s sInArgExpected (envUF state)}
-    -- sOutBodyExpected <- SFVarUF <$> applyUnionTuple f (sortUnif state)
     -- check the body
     sOutFound <- typeCheckExprUF body
     -- resolve vars for the the input
@@ -304,11 +303,11 @@ typeCheckExprUF (EApp func arg) = do
             state <- get
             let f = newKey (SortUFVal Nothing) :: AppFTuple SortVid SortUFVal
             -- create input and output types
-            sInExpected <- SFVarUF <$> applyUnionTuple f (sortUnif state) -- SortVid 1
-            sOutExpected <- SFVarUF <$> applyUnionTuple f (sortUnif state) -- SortVid 2
+            sInExpected <- SFVarUF <$> applyUnionTuple f (sortUnif state) 
+            sOutExpected <- SFVarUF <$> applyUnionTuple f (sortUnif state) 
             -- create a function type and try to equate it with the free variable
             let sFuncExpected = SFuncUF sInExpected sOutExpected
-            () <- equate sFuncExpected sFunc -- sFunc is SortVid 
+            () <- equate sFuncExpected sFunc
 
             () <- equate sInExpected sArg
 
