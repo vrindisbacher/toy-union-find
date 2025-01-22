@@ -74,12 +74,3 @@ probe :: (UnifyKey a, UnifyVal b) => a -> UnificationTable a b -> b
 probe k table = 
     let k_rep = find k table in 
     value k_rep
-
--- set a value directly
-probeMap :: (UnifyKey a, UnifyVal b) => a -> b -> UnificationTable a b -> UnificationTable a b
-probeMap k v table = 
-    let k_rep = find k table in 
-    let (hd, tl) = splitAt (index (parent k_rep)) (values table) in
-    let old = head tl in 
-    let newVal = VarValue { parent = parent old, value = v, rank = rank old } in
-    UnificationTable { values = hd ++ (newVal : tail tl) } 

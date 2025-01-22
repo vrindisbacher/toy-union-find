@@ -9,7 +9,7 @@ import Data.HashMap.Strict
 import Data.IORef
 import Control.Monad.State
     ( MonadIO(liftIO), StateT, evalStateT, MonadState(put, get) )
-import Union (UnifyKey (index, fromIndex), UnifyVal (unifyVals), UnificationTable, newKey, newUF, probe, unifyVarVar, probeMap)
+import Union (UnifyKey (index, fromIndex), UnifyVal (unifyVals), UnificationTable, newKey, newUF, probe, unifyVarVar, unifyVarVal)
 
 data Sort =
     SInt
@@ -182,11 +182,11 @@ newtype SortUFVal = SortUFVal (Maybe SortUF) deriving (Eq, Show)
 
 instance UnifyVal SortUFVal where
     unifyVals :: SortUFVal -> SortUFVal -> SortUFVal
-    unifyVals s1 s2 =
-        if s1 == s2 then
-            s1
-        else
-            error ("Failed to unify sorts: " ++ show s1 ++ " and " ++ show s2)
+    unifyVals (SortUFVal Nothing) (SortUFVal Nothing) = SortUFVal Nothing
+    unifyVals (SortUFVal Nothing) s@(SortUFVal (Just _)) = s
+    unifyVals s@(SortUFVal (Just _)) (SortUFVal Nothing)  = s
+    unifyVals s1@(SortUFVal (Just sLeft)) (SortUFVal (Just sRight)) = 
+        if sLeft == sRight then s1 else error ("Failed to unify sorts: " ++ show sLeft ++ " and " ++ show sRight)
 
 -- State for the checker
 type TypeEnvUF = HashMap String SortUF
@@ -238,12 +238,12 @@ equate (SFVarUF k1) (SFVarUF k2) = do
 equate s (SFVarUF k) = do
     state <- get
     s' <- resolveVars s
-    let f = probeMap k (SortUFVal (Just s'))
+    let f = unifyVarVal k (SortUFVal (Just s'))
     applyUnionTable f (sortUnif state)
 equate (SFVarUF k) s = do
     state <- get
     s' <- resolveVars s
-    let f = probeMap k (SortUFVal (Just s'))
+    let f = unifyVarVal k (SortUFVal (Just s'))
     applyUnionTable f (sortUnif state)
 equate SIntUF SIntUF = return ()
 equate SFloatUF SFloatUF = return ()
@@ -258,82 +258,59 @@ equate s1 s2 = error ("Type error. Cannot unify " ++ show s1 ++ " and " ++ show 
 
 
 
-typeCheckExprUF :: Expr -> SortUF -> CheckUFM SortUF
-typeCheckExprUF (EInt _) expected = do
-    () <- equate expected SIntUF
-    return SIntUF
-typeCheckExprUF (EFloat _) expected = do
-    () <- equate expected SFloatUF
-    return SFloatUF
-typeCheckExprUF (EVar s) expected = do
+typeCheckExprUF :: Expr -> CheckUFM SortUF
+typeCheckExprUF (EInt _) = return SIntUF
+typeCheckExprUF (EFloat _) = return SFloatUF
+typeCheckExprUF (EVar s) = do
     state <- get
     case Data.HashMap.Strict.lookup s (envUF state) of
-        Just t -> do
-            expected' <- resolveVars expected
-            t' <- resolveVars t
-            () <- equate expected' t'
-            return expected'
+        Just t -> resolveVars t
         Nothing -> error ("oops, var not found: " ++ show s)
-typeCheckExprUF (EBind s e1 e2) expected = do
-    s1 <- typeCheckExprUF e1 expected
+typeCheckExprUF (EBind s e1 e2) = do
+    s1 <- typeCheckExprUF e1
     state <- get
     put state { envUF = insert s s1 (envUF state) }
-    s2 <- typeCheckExprUF e2 expected
+    s2 <- typeCheckExprUF e2 
     !_ <- resolveVars s1
-    s2' <- resolveVars s2
-    expected' <- resolveVars expected
-    () <- equate s2' expected'
-    return expected'
-typeCheckExprUF (EAdd e1 e2) expected = do
-    !s1 <- typeCheckExprUF e1 expected
-    !s2 <- typeCheckExprUF e2 expected
-    s1' <- resolveVars s1
-    s2' <- resolveVars s2
-    expected' <- resolveVars expected
-    () <- equate s1' s2'
-    () <- equate s1' expected'
-    () <- equate s2' expected'
-    return expected'
-typeCheckExprUF (ELam s body) expected = do
+    resolveVars s2
+typeCheckExprUF (EAdd e1 e2) = do
+    !s1 <- typeCheckExprUF e1
+    !s2 <- typeCheckExprUF e2
+    () <- equate s1 s2
+    resolveVars s1
+typeCheckExprUF (ELam s body) = do
     -- the function is a variable and we need to figure out it's type
     state <- get
     let f = newKey (SortUFVal Nothing) :: AppFTuple SortVid SortUFVal
-    -- create input & ouput sort vars for the function
+    -- create input sort and bind it in the env
     sInArgExpected <- SFVarUF <$> applyUnionTuple f (sortUnif state)
     put state { envUF = insert s sInArgExpected (envUF state)}
-    sOutBodyExpected <- SFVarUF <$> applyUnionTuple f (sortUnif state)
-    () <- equate expected (SFuncUF sInArgExpected sOutBodyExpected)
+    -- sOutBodyExpected <- SFVarUF <$> applyUnionTuple f (sortUnif state)
     -- check the body
-    sOutFound <- typeCheckExprUF body sOutBodyExpected
+    sOutFound <- typeCheckExprUF body
     -- resolve vars for the the input
     sInFound <- resolveVars sInArgExpected
-    -- resolve vars for output
-    expected' <- resolveVars expected
-    -- error ("After equating and resolving " ++ show expected ++ " with " ++ show (SFuncUF sInArgExpected sOutBodyExpected) ++ ": " ++ show expected')
-    () <- equate expected' (SFuncUF sInFound sOutFound)
-    return expected'
-typeCheckExprUF (EApp func arg) expected = do
-    state <- get
-    let f = newKey (SortUFVal Nothing) :: AppFTuple SortVid SortUFVal
-    -- create input & ouput sort vars for the function
-    sFuncExpected <- SFVarUF <$> applyUnionTuple f (sortUnif state)
-    sFunc <- typeCheckExprUF func sFuncExpected
+    return (SFuncUF sInFound sOutFound)
+typeCheckExprUF (EApp func arg) = do
+    sFunc <- typeCheckExprUF func 
     case sFunc of 
         SFuncUF sIn sOut -> do
             -- get the type of sIn and arg
-            sArg <- typeCheckExprUF arg sIn 
+            sArg <- typeCheckExprUF arg
             -- make sure sIn and sArg match
             () <- equate sIn sArg
-            () <- equate sOut expected
-            resolveVars expected
-        SFVarUF _ -> error "todo"
+            resolveVars sOut
+        SFVarUF _ -> do
+            -- the function is a var and we need to deduce it's type
+            state <- get
+            let f = newKey (SortUFVal Nothing) :: AppFTuple SortVid SortUFVal
+            -- create input and output types
+            sInExpected <- SFVarUF <$> applyUnionTuple f (sortUnif state)
+            sOutExpected <- SFVarUF <$> applyUnionTuple f (sortUnif state)
+            error "todo"
         _ -> error ("Expected function but got: " ++ show sFunc)
 
 typeCheckUF :: Expr -> IO SortUF
 typeCheckUF e = do
-    let f = newKey (SortUFVal Nothing) :: AppFTuple SortVid SortUFVal
     ref <- newIORef newUF
-    evalStateT (do
-        state <- get
-        expected <- SFVarUF <$> applyUnionTuple f (sortUnif state)
-        typeCheckExprUF e expected) CheckStateUF { envUF = empty, sortUnif = ref }
+    evalStateT (do typeCheckExprUF e) CheckStateUF { envUF = empty, sortUnif = ref }
