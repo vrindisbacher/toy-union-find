@@ -1,14 +1,9 @@
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE DeriveGeneric      #-}
 
 module Sort where
 
 import Expr (Expr (..))
 import Data.HashMap.Strict
-import GHC.Generics (Generic)
-import Data.Hashable (Hashable)
--- import Data.Hashable
 import Data.IORef
 import Control.Monad.State
     ( MonadIO(liftIO), StateT, evalStateT, MonadState(put, get) )
@@ -19,7 +14,7 @@ data Sort =
     | SFunc Sort Sort
     -- free type variable (e.g. one that must be unified)
     | SFVar Int
-    deriving (Show, Eq, Generic, Hashable) 
+    deriving (Show, Eq) 
 
 -- hindley milner type checking
 
@@ -164,16 +159,24 @@ typeCheck e = do
 
 -- union find type checking
 
--- makes SFVar insertable into 
--- instance UnifyKey Sort where 
-    -- toIdx SInt = 0
-    -- toIdx SFloat = 1
-    -- toIdx SFunc sIn sOut = 
+-- define a type (SortVar ID) to use as keys in union
+newtype SortVid = SortVid Int deriving (Eq, Show)
+
+-- instance Unify
 
 
-    -- toIdx (TestKey i) = i
-    -- eq (TestKey i) (TestKey j) = i == j
-    -- unify (TestKey i) (TestKey j) = TestKey (min i j)
-    -- rank (TestKey i) = i
-    -- fromIdx = TestKey
-    -- toIdx ()
+
+-- type CheckUFM a = StateT CheckStateUF IO a
+
+-- freshUF :: CheckM Int
+-- freshUF = do
+--   state' <- get
+--   let rn = checkCount state'
+--   liftIO $ atomicModifyIORef' rn $ \n -> (n+1, n)
+
+-- data CheckStateUF = CheckStateUF { 
+--     checkCountUF :: IORef Int,
+--     envUF :: TypeEnv,
+--     substUF :: Subst,
+--     sortUnif :: IORef (UnificationTable Sort)
+-- }

@@ -1,86 +1,71 @@
-{-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE DeriveGeneric      #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
 
 module Union where
 
-import qualified Control.Monad
-import Data.HashMap.Strict hiding (union)
-import Data.Hashable
-import Prelude hiding (lookup)
-import GHC.Generics
+class (Eq a, Show a) => UnifyKey a where 
+    index :: a -> Int
+    from_index :: Int -> a
 
-data UnificationTable a = UnificationTable { values :: [a], unifToIdxMap :: HashMap a Int }
+class (Eq b, Show b) => UnifyVal b where 
+    unifyVals :: b -> b -> b
 
-{-# LANGUAGE FlexibleInstances #-}
+data (UnifyKey a, UnifyVal b) => VarValue a b = VarValue { parent :: a, value :: b, rank :: Int}
 
+newtype UnificationTable a b = UnificationTable { values :: [VarValue a b] }
 
-class (Eq a, Hashable a, Show a) => UnifyKey a where
-    unify :: a -> a -> a
-    rank :: a -> Int
+new :: (UnifyKey a, UnifyVal b) => UnificationTable a b
+new = UnificationTable { values = [] }
 
-getIdx :: (UnifyKey a) => a -> HashMap a Int -> Int
-getIdx val idxMap = case lookup val idxMap of 
-    Nothing -> error ("Could not find val in idx map " ++ show val)
-    Just idx -> idx
+newKey :: (UnifyKey a, UnifyVal b) => b -> UnificationTable a b -> UnificationTable a b
+newKey val table =
+    let key = from_index $ length (values table) in
+    let var = VarValue { parent = key, value = val, rank = 0 } in
+    UnificationTable { values = values table ++ [var] }
 
-new :: UnifyKey a => UnificationTable a
-new = UnificationTable { values = [], unifToIdxMap = empty }
+find :: (UnifyKey a, UnifyVal b) => a -> UnificationTable a b -> VarValue a b
+find x table = let rep = (values table !! index x) in 
+        if parent rep == x then rep else find (parent rep) table
 
-newKey :: UnifyKey a => a -> UnificationTable a -> UnificationTable a
-newKey value table =
-    let idx = length (values table) in
-    UnificationTable { values = values table ++ [value], unifToIdxMap = insert value idx (unifToIdxMap table) }
+redirectRep :: (UnifyKey a, UnifyVal b) => 
+    Int -> a -> a -> b -> UnificationTable a b -> UnificationTable a b
+redirectRep newRank oldRootKey newRootKey newVal table = 
+    -- update value for old root key parent to new root key
+    let (hd, tl) = splitAt (index oldRootKey) (values table) in
+    let old = head tl in 
+    let newOld = VarValue { parent = newRootKey, value = value old, rank = rank old } in
+    let vals = hd ++ (newOld : tail tl) in 
+    let (hd', tl') = splitAt (index newRootKey) vals in 
+    let valNew = head tl' in 
+    let newNew = VarValue { parent = parent valNew, value = newVal, rank = newRank } in 
+    UnificationTable { values = hd' ++ (newNew : tail tl') }
 
-find :: UnifyKey a => a -> UnificationTable a -> a
-find x table = let rep = values table !! getIdx x (unifToIdxMap table) in 
-        if rep == x then x else find rep table
+unifyReps :: (UnifyKey a, UnifyVal b) => 
+    VarValue a b -> VarValue a b -> b -> UnificationTable a b -> UnificationTable a b
+unifyReps x y newVal table = 
+    let rank_x = rank x in
+    let rank_y = rank y in 
+    if rank_x > rank_y then 
+        -- point b to a and set a to new
+        redirectRep rank_x (parent x) (parent y) newVal table
+    else if rank_x < rank_y then 
+        redirectRep rank_y (parent x) (parent y) newVal table
+    else 
+        redirectRep (rank_x + 1) (parent x) (parent y) newVal table
 
-union :: UnifyKey a  => a -> a -> UnificationTable a -> UnificationTable a
-union x y table =
+unifyVarVar :: (UnifyKey a, UnifyVal b) => a -> a -> UnificationTable a b -> UnificationTable a b
+unifyVarVar x y table = 
+    let y_rep = find y table in 
     let x_rep = find x table in
-    let y_rep = find y table in
-    if x_rep == y_rep then table else
-    let combined = unify x_rep y_rep in
-    let x_rank = rank x_rep in
-    let y_rank = rank y_rep in
-    if x_rank > y_rank then
-        -- y should point to x - and x should be combined
-        let y_idx = getIdx y_rep (unifToIdxMap table) in
-        let (first, scd) = splitAt y_idx (values table) in
-        let new_values = first ++ (x_rep : tail scd) in
-        let x_idx = getIdx x_rep (unifToIdxMap table) in
-        let (first_x, scd_x) = splitAt x_idx new_values in
-        UnificationTable { values = first_x ++ (combined : tail scd_x), unifToIdxMap = unifToIdxMap table }
-    else
-        -- x should point to y and y should be combined
-        let x_idx = getIdx x_rep (unifToIdxMap table) in
-        let (first, scd) = splitAt x_idx (values table) in
-        let new_values = first ++ (y_rep : tail scd) in
-        let y_idx = getIdx y_rep (unifToIdxMap table) in
-        let (first_y, scd_y) = splitAt y_idx new_values in
-        UnificationTable { values = first_y ++ (combined : tail scd_y), unifToIdxMap = unifToIdxMap table }
+    let combined = unifyVals (value y_rep) (value x_rep) in 
+    unifyReps x_rep y_rep combined table
 
-newtype TestKey = TestKey Int deriving (Eq, Show, Generic, Hashable)
-
-instance UnifyKey TestKey where
-    unify (TestKey i) (TestKey j) = TestKey (min i j)
-    rank (TestKey i) = i
-
-testUnionFind :: IO ()
-testUnionFind = do
-    -- Test creating a new unification table
-    let table = new :: UnificationTable TestKey
-    Control.Monad.when (values table /= []) $ error "Test failed: new unification table should be empty"
-
-    -- Test adding a new key to the table
-    let table1 = newKey (TestKey 0) new
-    Control.Monad.when (values table1 /= [TestKey 0]) $ error "Test failed: new key should be added to the table"
-
-    -- Test finding the representative of a key
-    let table2 = newKey (TestKey 0) new
-    Control.Monad.when (find (TestKey 0) table2 /= TestKey 0) $ error "Test failed: should find the representative of the key"
-
-    -- Test union of two keys
-    let table3 = newKey (TestKey 0) $ newKey (TestKey 1) new
-    let table4 = union (TestKey 0) (TestKey 1) table3
-    Control.Monad.when (find (TestKey 0) table4 /= TestKey 0 || find (TestKey 1) table4 /= TestKey 0) $ error "Test failed: keys should be unioned"
+unifyVarVal :: (UnifyKey a, UnifyVal b) => a -> b -> UnificationTable a b -> UnificationTable a b
+unifyVarVal k v table = 
+    let k_rep = find k table in 
+    let v' = unifyVals (value k_rep) v in 
+    let (hd, tl) = splitAt (index (parent k_rep)) (values table) in
+    let old = head tl in 
+    let newVal = VarValue { parent = parent old, value = v', rank = rank old } in
+    UnificationTable { values = hd ++ (newVal : tail tl) } 
