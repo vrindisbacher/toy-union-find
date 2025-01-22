@@ -182,10 +182,14 @@ newtype SortUFVal = SortUFVal (Maybe SortUF) deriving (Eq, Show)
 instance UnifyVal SortUFVal where
     unifyVals :: SortUFVal -> SortUFVal -> SortUFVal
     unifyVals s1 s2 =
-        if s1 == s2 then
-            s1
-        else
-            error ("Failed to equate sorts: " ++ show s1 ++ " and " ++ show s2)
+        case (s1, s2) of 
+            (SortUFVal Nothing, SortUFVal Nothing) -> SortUFVal Nothing
+            (SortUFVal (Just s), SortUFVal Nothing) -> SortUFVal (Just s)
+            (SortUFVal Nothing, SortUFVal (Just s)) -> SortUFVal (Just s)
+            (s1', s2') -> if s1' == s2' then
+                    s1'
+                else
+                error ("Failed to equate sorts: " ++ show s1 ++ " and " ++ show s2)
 
 -- State for the checker
 type TypeEnvUF = HashMap String SortUF
@@ -306,13 +310,19 @@ typeCheckExprUF (EBind s e1 e2) expected = do
         -- error ("Type error. Expected " ++ show expected' ++ " but got " ++ show found')
 typeCheckExprUF (EAdd e1 e2) expected = do
     state <- get
+    -- new var
     let f = newKey (SortUFVal Nothing) :: UnificationTable SortVid SortUFVal -> (SortVid, UnificationTable SortVid SortUFVal)
     found <- SFVarUF <$> applyUnionTuple f (sortUnif state)
-    _ <- typeCheckExprUF e1 found
-    _ <- typeCheckExprUF e2 found
-    found' <- resolveVars found
+    -- type check e1 & e2
+    s1 <- typeCheckExprUF e1 found
+    s2 <- typeCheckExprUF e2 found
+    s1' <- resolveVars s1
+    s2' <- resolveVars s2
     expected' <- resolveVars expected
-    () <- equate expected' found' 
+    found' <- resolveVars found
+    () <- equate s1' s2'
+    () <- equate s1' expected'
+    () <- equate expected' found'
     return expected'
     -- if expected' == found' then
     --     return expected'
@@ -364,8 +374,7 @@ typeCheckExprUF (EApp func arg) expected = do
 typeCheckUF :: Expr -> IO SortUF
 typeCheckUF e = do
     let f = newKey (SortUFVal Nothing) :: AppFTuple SortVid SortUFVal
-    let uf = newUF :: UnificationTable SortVid SortUFVal
-    ref <- newIORef uf
+    ref <- newIORef newUF
     evalStateT (do
         state <- get
         expected <- SFVarUF <$> applyUnionTuple f (sortUnif state)
