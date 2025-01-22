@@ -190,11 +190,9 @@ instance UnifyVal SortUFVal where
 
 -- State for the checker
 type TypeEnvUF = HashMap String SortUF
--- type SubstUF = HashMap Int SortUF
 
 data CheckStateUF = CheckStateUF {
     envUF :: TypeEnvUF,
-    -- substUF :: Subst,
     sortUnif :: IORef (UnificationTable SortVid SortUFVal)
 }
 
@@ -297,29 +295,40 @@ typeCheckExprUF (EAdd e1 e2) expected = do
     () <- equate s2' expected'
     return expected'
 typeCheckExprUF (ELam s body) expected = do
-    case expected of
-        SFuncUF sIn sOut -> do
-            state <- get
-            put state { envUF = insert s sIn (envUF state)}
-            sOutFound <- typeCheckExprUF body sOut
-            sInFound <- resolveVars sIn
-            expected' <- resolveVars expected
-            () <- equate expected' (SFuncUF sInFound sOutFound)
-            return expected'
-        s' -> error ("Type error. Expected function but got: " ++ show s')
-typeCheckExprUF (EApp func arg) expected = do
+    -- the function is a variable and we need to figure out it's type
     state <- get
     let f = newKey (SortUFVal Nothing) :: AppFTuple SortVid SortUFVal
     -- create input & ouput sort vars for the function
     sInArgExpected <- SFVarUF <$> applyUnionTuple f (sortUnif state)
+    put state { envUF = insert s sInArgExpected (envUF state)}
     sOutBodyExpected <- SFVarUF <$> applyUnionTuple f (sortUnif state)
-    -- type check func and arg
-    _ <- typeCheckExprUF func (SFuncUF sInArgExpected sOutBodyExpected)
-    sInArgExpected' <- resolveVars sInArgExpected
-    sOutBodyExpected' <- resolveVars sOutBodyExpected
-    _ <- typeCheckExprUF arg sInArgExpected'
-    () <- equate expected sOutBodyExpected'
-    resolveVars expected
+    () <- equate expected (SFuncUF sInArgExpected sOutBodyExpected)
+    -- check the body
+    sOutFound <- typeCheckExprUF body sOutBodyExpected
+    -- resolve vars for the the input
+    sInFound <- resolveVars sInArgExpected
+    -- resolve vars for output
+    expected' <- resolveVars expected
+    -- error ("After equating and resolving " ++ show expected ++ " with " ++ show (SFuncUF sInArgExpected sOutBodyExpected) ++ ": " ++ show expected')
+    () <- equate expected' (SFuncUF sInFound sOutFound)
+    return expected'
+typeCheckExprUF (EApp func arg) expected = do
+    state <- get
+    let f = newKey (SortUFVal Nothing) :: AppFTuple SortVid SortUFVal
+    -- create input & ouput sort vars for the function
+    sFuncExpected <- SFVarUF <$> applyUnionTuple f (sortUnif state)
+    sFunc <- typeCheckExprUF func sFuncExpected
+    case sFunc of 
+        SFuncUF sIn sOut -> do
+            -- get the type of sIn and arg
+            sArg <- typeCheckExprUF arg sIn 
+            -- make sure sIn and sArg match
+            () <- equate sIn sArg
+            () <- equate sOut expected
+            resolveVars expected
+        SFVarUF _ -> error "todo"
+        _ -> error ("Expected function but got: " ++ show sFunc)
+
 typeCheckUF :: Expr -> IO SortUF
 typeCheckUF e = do
     let f = newKey (SortUFVal Nothing) :: AppFTuple SortVid SortUFVal
