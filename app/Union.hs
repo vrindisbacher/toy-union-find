@@ -6,7 +6,7 @@ module Union where
 
 class (Eq a, Show a) => UnifyKey a where 
     index :: a -> Int
-    from_index :: Int -> a
+    fromIndex :: Int -> a
 
 class (Eq b, Show b) => UnifyVal b where 
     unifyVals :: b -> b -> b
@@ -15,14 +15,14 @@ data (UnifyKey a, UnifyVal b) => VarValue a b = VarValue { parent :: a, value ::
 
 newtype UnificationTable a b = UnificationTable { values :: [VarValue a b] }
 
-new :: (UnifyKey a, UnifyVal b) => UnificationTable a b
-new = UnificationTable { values = [] }
+newUF :: (UnifyKey a, UnifyVal b) => UnificationTable a b
+newUF = UnificationTable { values = [] }
 
-newKey :: (UnifyKey a, UnifyVal b) => b -> UnificationTable a b -> UnificationTable a b
+newKey :: (UnifyKey a, UnifyVal b) => b -> UnificationTable a b -> (a, UnificationTable a b)
 newKey val table =
-    let key = from_index $ length (values table) in
+    let key = fromIndex $ length (values table) in
     let var = VarValue { parent = key, value = val, rank = 0 } in
-    UnificationTable { values = values table ++ [var] }
+    (key, UnificationTable { values = values table ++ [var] })
 
 find :: (UnifyKey a, UnifyVal b) => a -> UnificationTable a b -> VarValue a b
 find x table = let rep = (values table !! index x) in 
@@ -69,3 +69,8 @@ unifyVarVal k v table =
     let old = head tl in 
     let newVal = VarValue { parent = parent old, value = v', rank = rank old } in
     UnificationTable { values = hd ++ (newVal : tail tl) } 
+
+probe :: (UnifyKey a, UnifyVal b) => a -> UnificationTable a b -> b
+probe k table = 
+    let k_rep = find k table in 
+    value k_rep
