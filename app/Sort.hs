@@ -1,5 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE BangPatterns #-}
 
 module Sort where
 
@@ -8,7 +9,7 @@ import Data.HashMap.Strict
 import Data.IORef
 import Control.Monad.State
     ( MonadIO(liftIO), StateT, evalStateT, MonadState(put, get) )
-import Union (UnifyKey (index, fromIndex), UnifyVal (unifyVals), UnificationTable, newKey, newUF, probe, unifyVarVar, unifyVarVal)
+import Union (UnifyKey (index, fromIndex), UnifyVal (unifyVals), UnificationTable, newKey, newUF, probe, unifyVarVar, probeMap)
 
 data Sort =
     SInt
@@ -182,14 +183,10 @@ newtype SortUFVal = SortUFVal (Maybe SortUF) deriving (Eq, Show)
 instance UnifyVal SortUFVal where
     unifyVals :: SortUFVal -> SortUFVal -> SortUFVal
     unifyVals s1 s2 =
-        case (s1, s2) of 
-            (SortUFVal Nothing, SortUFVal Nothing) -> SortUFVal Nothing
-            (SortUFVal (Just s), SortUFVal Nothing) -> SortUFVal (Just s)
-            (SortUFVal Nothing, SortUFVal (Just s)) -> SortUFVal (Just s)
-            (s1', s2') -> if s1' == s2' then
-                    s1'
-                else
-                error ("Failed to equate sorts: " ++ show s1 ++ " and " ++ show s2)
+        if s1 == s2 then
+            s1
+        else
+            error ("Failed to unify sorts: " ++ show s1 ++ " and " ++ show s2)
 
 -- State for the checker
 type TypeEnvUF = HashMap String SortUF
@@ -218,39 +215,37 @@ applyUnionVal f rn = do
 
 applyUnionTable :: (UnifyKey a, UnifyVal b) => AppFTable a b -> IORef (UnificationTable a b) -> CheckUFM ()
 applyUnionTable f rn = do
-    let thing = atomicModifyIORef' rn (\u -> let v = f u in (v, ()))
-    liftIO thing
+    liftIO $ atomicModifyIORef' rn (\u -> let !v = f u in (v, ()))
 
 resolveVars :: SortUF -> CheckUFM SortUF
 resolveVars SIntUF = return SIntUF
 resolveVars SFloatUF = return SFloatUF
--- ??
-resolveVars (SFVarUF k) = do
+resolveVars s@(SFVarUF k) = do
     state <- get
     let f = probe k
     currSort <- applyUnionVal f (sortUnif state)
     case currSort of
         SortUFVal (Just sort) -> resolveVars sort
-        SortUFVal Nothing ->  return (SFVarUF k)
+        SortUFVal Nothing -> return s
 resolveVars (SFuncUF s1 s2) = do
     s1' <- resolveVars s1
     s2' <- resolveVars s2
     return (SFuncUF s1' s2')
 
 equate :: SortUF -> SortUF -> CheckUFM ()
-equate (SFVarUF k1) (SFVarUF k2) = do 
-    state <- get 
+equate (SFVarUF k1) (SFVarUF k2) = do
+    state <- get
     let f = unifyVarVar k1 k2
     applyUnionTable f (sortUnif state)
-equate s (SFVarUF k) = do 
-    state <- get 
+equate s (SFVarUF k) = do
+    state <- get
     s' <- resolveVars s
-    let f = unifyVarVal k (SortUFVal (Just s'))
+    let f = probeMap k (SortUFVal (Just s'))
     applyUnionTable f (sortUnif state)
-equate (SFVarUF k) s = do 
-    state <- get 
+equate (SFVarUF k) s = do
+    state <- get
     s' <- resolveVars s
-    let f = unifyVarVal k (SortUFVal (Just s'))
+    let f = probeMap k (SortUFVal (Just s'))
     applyUnionTable f (sortUnif state)
 equate SIntUF SIntUF = return ()
 equate SFloatUF SFloatUF = return ()
@@ -267,21 +262,11 @@ equate s1 s2 = error ("Type error. Cannot unify " ++ show s1 ++ " and " ++ show 
 
 typeCheckExprUF :: Expr -> SortUF -> CheckUFM SortUF
 typeCheckExprUF (EInt _) expected = do
-    expected' <- resolveVars expected
-    () <- equate expected' SIntUF
+    () <- equate expected SIntUF
     return SIntUF
-    -- if expected' == SIntUF then
-        -- return SIntUF
-    -- else
-        -- error ("Type error. Expected int but got: " ++ show expected')
 typeCheckExprUF (EFloat _) expected = do
-    expected' <- resolveVars expected
-    () <- equate expected' SFloatUF
+    () <- equate expected SFloatUF
     return SFloatUF
-    -- if expected' == SFloatUF then
-    --     return SFloatUF
-    -- else
-    --     error ("Type error. Expected float but got: " ++ show expected')
 typeCheckExprUF (EVar s) expected = do
     state <- get
     case Data.HashMap.Strict.lookup s (envUF state) of
@@ -290,58 +275,37 @@ typeCheckExprUF (EVar s) expected = do
             t' <- resolveVars t
             () <- equate expected' t'
             return expected'
-            -- if expected' == t' then
-                -- return expected'
-            -- else
-                -- error ("Type error. Expected " ++ show expected' ++ " but got " ++ show t')
         Nothing -> error ("oops, var not found: " ++ show s)
 typeCheckExprUF (EBind s e1 e2) expected = do
-    t <- typeCheckExprUF e1 expected
+    s1 <- typeCheckExprUF e1 expected
     state <- get
-    put state { envUF = insert s t (envUF state) }
-    found <- typeCheckExprUF e2 expected
-    found' <- resolveVars found
+    put state { envUF = insert s s1 (envUF state) }
+    s2 <- typeCheckExprUF e2 expected
+    !_ <- resolveVars s1
+    s2' <- resolveVars s2
     expected' <- resolveVars expected
-    () <- equate found' expected'
+    () <- equate s2' expected'
     return expected'
-    -- if found' == expected' then
-        -- return expected'
-    -- else
-        -- error ("Type error. Expected " ++ show expected' ++ " but got " ++ show found')
 typeCheckExprUF (EAdd e1 e2) expected = do
-    state <- get
-    -- new var
-    let f = newKey (SortUFVal Nothing) :: UnificationTable SortVid SortUFVal -> (SortVid, UnificationTable SortVid SortUFVal)
-    found <- SFVarUF <$> applyUnionTuple f (sortUnif state)
-    -- type check e1 & e2
-    s1 <- typeCheckExprUF e1 found
-    s2 <- typeCheckExprUF e2 found
+    !s1 <- typeCheckExprUF e1 expected
+    !s2 <- typeCheckExprUF e2 expected
     s1' <- resolveVars s1
     s2' <- resolveVars s2
     expected' <- resolveVars expected
-    found' <- resolveVars found
     () <- equate s1' s2'
     () <- equate s1' expected'
-    () <- equate expected' found'
+    () <- equate s2' expected'
     return expected'
-    -- if expected' == found' then
-    --     return expected'
-    -- else
-    --     error ("Type error. Expected " ++ show expected' ++ " but got " ++ show found')
 typeCheckExprUF (ELam s body) expected = do
     case expected of
         SFuncUF sIn sOut -> do
             state <- get
             put state { envUF = insert s sIn (envUF state)}
-            found <- typeCheckExprUF body sOut
-            found' <- resolveVars (SFuncUF sIn found)
+            sOutFound <- typeCheckExprUF body sOut
+            sInFound <- resolveVars sIn
             expected' <- resolveVars expected
-            equate expected' found'
+            () <- equate expected' (SFuncUF sInFound sOutFound)
             return expected'
-            -- if found' == expected' then
-            --     return expected'
-            -- else 
-            --   error ("Type Error. Expected " ++ show expected' ++ " but got " ++ show found)
         s' -> error ("Type error. Expected function but got: " ++ show s')
 typeCheckExprUF (EApp func arg) expected = do
     state <- get
@@ -350,27 +314,12 @@ typeCheckExprUF (EApp func arg) expected = do
     sInArgExpected <- SFVarUF <$> applyUnionTuple f (sortUnif state)
     sOutBodyExpected <- SFVarUF <$> applyUnionTuple f (sortUnif state)
     -- type check func and arg
-    sFuncExpected <- typeCheckExprUF func (SFuncUF sInArgExpected sOutBodyExpected)
-    sArg <- typeCheckExprUF arg sInArgExpected
-    -- resolve all type variables
-    sFuncExpected' <- resolveVars sFuncExpected
-    case sFuncExpected' of
-        SFuncUF sIn sOut -> do
-            -- sIn & sOut wshould be resolved by resolving the func type above
-            sArg' <- resolveVars sArg
-            expected' <- resolveVars expected
-            () <- equate sIn sArg'
-            () <- equate sOut expected'
-            return expected'
-            -- if sIn == sArg' then
-            --     if sOut == expected' then
-            --         return expected'
-            --     else
-            --         error ("Type error. Expected Func to have type " ++  show sFuncExpected' ++ " but got: " ++ show (SFuncUF sArg' expected'))
-            -- else
-            --     error ("Type error. Expected " ++ show expected' ++ " but got: " ++ show sArg)
-        s' -> error ("Type error. Expected function but got: " ++ show s')
-
+    _ <- typeCheckExprUF func (SFuncUF sInArgExpected sOutBodyExpected)
+    sInArgExpected' <- resolveVars sInArgExpected
+    sOutBodyExpected' <- resolveVars sOutBodyExpected
+    _ <- typeCheckExprUF arg sInArgExpected'
+    () <- equate expected sOutBodyExpected'
+    resolveVars expected
 typeCheckUF :: Expr -> IO SortUF
 typeCheckUF e = do
     let f = newKey (SortUFVal Nothing) :: AppFTuple SortVid SortUFVal

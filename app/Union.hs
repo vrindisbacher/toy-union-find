@@ -11,9 +11,9 @@ class (Eq a, Show a) => UnifyKey a where
 class (Eq b, Show b) => UnifyVal b where 
     unifyVals :: b -> b -> b
 
-data (UnifyKey a, UnifyVal b) => VarValue a b = VarValue { parent :: a, value :: b, rank :: Int}
+data (UnifyKey a, UnifyVal b) => VarValue a b = VarValue { parent :: a, value :: b, rank :: Int} deriving Show
 
-newtype UnificationTable a b = UnificationTable { values :: [VarValue a b] }
+newtype UnificationTable a b = UnificationTable { values :: [VarValue a b] } deriving Show
 
 newUF :: (UnifyKey a, UnifyVal b) => UnificationTable a b
 newUF = UnificationTable { values = [] }
@@ -74,3 +74,12 @@ probe :: (UnifyKey a, UnifyVal b) => a -> UnificationTable a b -> b
 probe k table = 
     let k_rep = find k table in 
     value k_rep
+
+-- set a value directly
+probeMap :: (UnifyKey a, UnifyVal b) => a -> b -> UnificationTable a b -> UnificationTable a b
+probeMap k v table = 
+    let k_rep = find k table in 
+    let (hd, tl) = splitAt (index (parent k_rep)) (values table) in
+    let old = head tl in 
+    let newVal = VarValue { parent = parent old, value = v, rank = rank old } in
+    UnificationTable { values = hd ++ (newVal : tail tl) } 
