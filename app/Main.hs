@@ -11,11 +11,11 @@ check e = do
 
 main :: IO ()
 main = do
-    -- let f1 = ELam "x" (EAdd (EVar "x") (EInt 3))
-    -- let f2 = ELam "f" (EApp (EVar "f") (EInt 3))
-    -- let e1 = EBind "f2" f2 (EApp (EVar "f2") f1)
-    -- res1 <- check e1
-    -- print res1
+    let f1 = ELam "x" (EAdd (EVar "x") (EInt 3))
+    let f2 = ELam "f" (EApp (EVar "f") (EInt 3))
+    let e1 = EBind "f2" f2 (EApp (EVar "f2") f1)
+    res1 <- check e1
+    print res1
 
     let body = EAdd (EVar "x") (EInt 3)
     let e2 = EApp (ELam "x" body) (EAdd (EInt 1) (EInt 2))

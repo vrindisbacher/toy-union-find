@@ -293,10 +293,9 @@ typeCheckExprUF (ELam s body) = do
     return (SFuncUF sInFound sOutFound)
 typeCheckExprUF (EApp func arg) = do
     sFunc <- typeCheckExprUF func 
+    sArg <- typeCheckExprUF arg
     case sFunc of 
         SFuncUF sIn sOut -> do
-            -- get the type of sIn and arg
-            sArg <- typeCheckExprUF arg
             -- make sure sIn and sArg match
             () <- equate sIn sArg
             resolveVars sOut
@@ -305,12 +304,19 @@ typeCheckExprUF (EApp func arg) = do
             state <- get
             let f = newKey (SortUFVal Nothing) :: AppFTuple SortVid SortUFVal
             -- create input and output types
-            sInExpected <- SFVarUF <$> applyUnionTuple f (sortUnif state)
-            sOutExpected <- SFVarUF <$> applyUnionTuple f (sortUnif state)
-            error "todo"
+            sInExpected <- SFVarUF <$> applyUnionTuple f (sortUnif state) -- SortVid 1
+            sOutExpected <- SFVarUF <$> applyUnionTuple f (sortUnif state) -- SortVid 2
+            -- create a function type and try to equate it with the free variable
+            let sFuncExpected = SFuncUF sInExpected sOutExpected
+            () <- equate sFuncExpected sFunc -- sFunc is SortVid 
+
+            () <- equate sInExpected sArg
+
+            resolveVars sOutExpected
         _ -> error ("Expected function but got: " ++ show sFunc)
 
 typeCheckUF :: Expr -> IO SortUF
 typeCheckUF e = do
     ref <- newIORef newUF
     evalStateT (do typeCheckExprUF e) CheckStateUF { envUF = empty, sortUnif = ref }
+    
