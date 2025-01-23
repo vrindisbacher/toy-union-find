@@ -1,5 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE InstanceSigs #-}
 
 module Sort where
 
@@ -8,8 +9,8 @@ import Data.HashMap.Strict
 import Data.IORef
 import Control.Monad.State
     ( MonadIO(liftIO), StateT, evalStateT, MonadState(put, get) )
-import Union 
-import GHC.IO (unsafePerformIO)
+import Union (UF (MkUF), union, find, UFVal (unionVals, next))
+import qualified Union
 
 data Sort =
     SInt
@@ -80,8 +81,7 @@ unifyVar i t@(SFVar j) = do
 unifyVar i t = do
     state <- get
     case Data.HashMap.Strict.lookup i (subst state) of
-        Just (SFVar j) ->
-            put state { subst = insert j t (insert i t (subst state)) }
+        Just (SFVar j) -> put state { subst = insert j t (insert i t (subst state)) }
         Just t'        -> if t == t' then return () else unify t t'
         Nothing        -> put state { subst = insert i t (subst state) }
 
@@ -162,17 +162,25 @@ typeCheck e = do
 
 -- union find type checking
 
-instance UFVal Sort where 
-    -- unifyUF :: b -> b -> b 
-    unionVals SInt SInt = SInt
-    unionVals SFloat SFloat = SFloat
-    unionVals (SFVar _) s = s
-    unionVals s (SFVar _) = s
-    unionVals (SFunc s1 s2) (SFunc s1' s2') = SFunc (unionVals s1 s1') (unionVals s2 s2')
-    unionVals s1 s2 = error ("Cannot unify " ++ show s1 ++ " " ++ show s2)
-    next s = case s of 
-        SFVar i -> Just i 
-        _ -> Nothing 
+unionFuncArgs :: UF Sort -> Int -> Sort -> Sort -> UF Sort 
+unionFuncArgs u i s1 s2 = case (s1 , s2) of 
+    (SFVar i1, _) -> Union.union u i1 s2
+    (_, SFVar i2) -> Union.union u i2 s1
+    (_, _) -> unionVals u i s1 s2
+
+instance UFVal Sort where
+    unionVals :: UF Sort -> Int -> Sort -> Sort -> UF Sort
+    unionVals ufM _ SInt SInt = ufM
+    unionVals ufM _ SFloat SFloat = ufM
+    unionVals (MkUF ufM) i (SFVar _) s = MkUF (insert i s ufM)
+    unionVals (MkUF ufM) i s (SFVar _) = MkUF (insert i s ufM)
+    unionVals u i (SFunc s1 s2) (SFunc s1' s2') = 
+        let u' = unionFuncArgs u i s1 s1' in 
+            unionFuncArgs u' i s2 s2'
+    unionVals _ _ s1 s2 = error ("Cannot unify " ++ show s1 ++ " " ++ show s2)
+    next s = case s of
+        SFVar i -> Just i
+        _ -> Nothing
 
 -- State for the checker
 type TypeEnvUF = HashMap String Sort
@@ -187,7 +195,7 @@ type CheckUFM a = StateT CheckStateUF IO a
 
 freshSFVar :: CheckUFM Int
 freshSFVar = do
-  state <- get 
+  state <- get
   let rn = chCount state
   liftIO $ atomicModifyIORef' rn $ \n -> (n+1, n)
 
@@ -197,34 +205,17 @@ unifyUF SFloat SFloat = return ()
 unifyUF (SFVar i) (SFVar j) = do
     state <- get
     let ufRef = uf state
-    let !_ = unsafePerformIO $ print ("union of two vars " ++ show i ++ " " ++ show j)
-    !_ <- liftIO $ atomicModifyIORef' ufRef $ \ufM -> 
-        let newUF = Union.union ufM i (SFVar j) in
-        let !_ = unsafePerformIO $ print ("uf is now " ++ show newUF)
-        in 
-        (newUF, ())
+    liftIO $ atomicModifyIORef' ufRef $ \ufM -> (Union.union ufM i (SFVar j), ())
     return ()
 unifyUF (SFVar i) s = do
     state <- get
     let ufRef = uf state
-    let !_ = unsafePerformIO $ print ("union of var and sort " ++ show i ++ " " ++ show s)
-    !_ <- liftIO $ atomicModifyIORef' ufRef $ \ufM -> 
-        let newUF = Union.union ufM i s in
-        let !_ = unsafePerformIO $ print ("uf is now " ++ show newUF)
-        in 
-        (newUF, ())
-    -- !_ <- liftIO $ atomicModifyIORef' ufRef $ \ufM -> (Union.union ufM i s, ())
+    liftIO $ atomicModifyIORef' ufRef $ \ufM -> (Union.union ufM i s, ())
     return ()
 unifyUF s (SFVar i) = do
     state <- get
     let ufRef = uf state
-    let !_ = unsafePerformIO $ print ("union of sort and var " ++ show s ++ " " ++ show i)
-    !_ <- liftIO $ atomicModifyIORef' ufRef $ \ufM -> 
-        let newUF = Union.union ufM i s in
-        let !_ = unsafePerformIO $ print ("uf is now " ++ show newUF)
-        in 
-        (newUF, ())
-    -- !_ <- liftIO $ atomicModifyIORef' ufRef $ \ufM -> (Union.union ufM i s, ())
+    liftIO $ atomicModifyIORef' ufRef $ \ufM -> (Union.union ufM i s, ())
     return ()
 unifyUF (SFunc s1 s2) (SFunc s1' s2') = do
     unifyUF s1 s1'
@@ -249,7 +240,6 @@ typeCheckExprUF (EBind s e1 e2) = do
 typeCheckExprUF (EAdd e1 e2) = do
     !s1 <- typeCheckExprUF e1
     !s2 <- typeCheckExprUF e2
-    let !_ = unsafePerformIO $ print "unifying in EADD"
     unifyUF s1 s2
     return s2
 typeCheckExprUF (ELam s body) = do
@@ -263,12 +253,11 @@ typeCheckExprUF (ELam s body) = do
     sOut <- typeCheckExprUF body
     return (SFunc sIn sOut)
 typeCheckExprUF (EApp func arg) = do
-    sFunc <- typeCheckExprUF func 
+    sFunc <- typeCheckExprUF func
     sArg <- typeCheckExprUF arg
-    case sFunc of 
+    case sFunc of
         SFunc sIn sOut -> do
             -- make sure sIn and sArg match
-            let !_ = unsafePerformIO $ print "unifying arg in EApp - func case"
             unifyUF sIn sArg
             return sOut
         SFVar _ -> do
@@ -278,15 +267,13 @@ typeCheckExprUF (EApp func arg) = do
             let sIn = SFVar xIn
             let sOut = SFVar xOut
             let sFuncFresh = SFunc sIn sOut
-            let !_ = unsafePerformIO $ print "unifying function in EApp - var case"
             unifyUF sFunc sFuncFresh
-            let !_ = unsafePerformIO $ print "unifying arg in EApp - var case"
             unifyUF sIn sArg
-            return sOut 
+            return sOut
         _ -> error ("Expected function but got: " ++ show sFunc)
 
 resolveUF :: UF Sort -> Sort -> Sort
-resolveUF ufM ty@(SFVar i) = case find ufM i of 
+resolveUF ufM ty@(SFVar i) = case find ufM i of
     Nothing -> ty
     Just (_, s) -> resolveUF ufM s
 resolveUF ufM (SFunc s1 s2) = SFunc (resolveUF ufM s1) (resolveUF ufM s2)
@@ -296,7 +283,7 @@ resolveUF _ SFloat = SFloat
 typeCheckUF :: Expr -> IO Sort
 typeCheckUF e = do
     chCountRef <- newIORef 0
-    ufRef <- newIORef new
+    ufRef <- newIORef Union.new
     res <- evalStateT (do
         result <- typeCheckExprUF e
         state <- get
@@ -304,5 +291,4 @@ typeCheckUF e = do
         ) CheckStateUF { envUF = empty, uf = ufRef, chCount = chCountRef }
     let (result, state) = res
     finalUF <- readIORef (uf state)
-    print ("Final uf " ++ show finalUF)
     return (resolveUF finalUF result)

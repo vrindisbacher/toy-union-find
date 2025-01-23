@@ -1,3 +1,4 @@
+{-# LANGUAGE InstanceSigs #-}
 module Elab (testElab) where
 import Data.HashMap.Strict (lookup, insert, HashMap, empty)
 import Prelude hiding (lookup)
@@ -57,16 +58,25 @@ type ElabEnv = HashMap String Sort
 data ChState = ChS { chCount :: IORef Int, uf :: IORef (UF Sort) }
 type CheckM = ReaderT ChState IO
 
+
+unionAppArgs :: UF Sort -> Int -> Sort -> Sort -> UF Sort 
+unionAppArgs u i s1 s2 = case (s1 , s2) of 
+    (FVar i1, _) -> Union.union u i1 s2
+    (_, FVar i2) -> Union.union u i2 s1
+    (_, _) -> unionVals u i s1 s2 -- note I'm almost sure this is wrong
+
 instance UFVal Sort where
     next s = case s of 
         FVar i -> Just i
         _ -> Nothing
-    unionVals FInt FInt = FInt
-    unionVals FReal FReal = FReal
-    unionVals (FVar _) s = s
-    unionVals s (FVar _) = s
-    unionVals (FApp s1 s2) (FApp s1' s2') = FApp (unionVals s1 s1') (unionVals s2 s2')
-    unionVals _ _ = error "Cannot unify"
+    unionVals ufM _ FInt FInt = ufM
+    unionVals ufM _ FReal FReal = ufM
+    unionVals (MkUF ufM) i (FVar _) s = MkUF (insert i s ufM)
+    unionVals (MkUF ufM) i s (FVar _) = MkUF (insert i s ufM)
+    unionVals u i (FApp s1 s2) (FApp s1' s2') = 
+        let u' = unionAppArgs u i s1 s1' in 
+            unionAppArgs u' i s2 s2'
+    unionVals _ _ _ _ = error "Cannot unify"
 
 fresh :: CheckM Int
 fresh = do
