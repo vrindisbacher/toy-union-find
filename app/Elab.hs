@@ -26,7 +26,8 @@ data Sort = FInt
 
 testElab :: IO () 
 testElab = do
-    let e = EApp (ELam ("x", FVar 0) (EVar "x")) (EInt 1)
+    -- let e = EApp (ELam ("x", FVar 0) (EVar "x")) (EInt 1)
+    let e = EApp (ELam ("x", FVar 0) (EAdd (EVar "x") (EVar "x"))) (EReal 1)
     chState <- ChS <$> newIORef 1 <*> newIORef new
     (e', s) <- runReaderT (elab empty e) chState
     finalUF <- readIORef (uf chState)
