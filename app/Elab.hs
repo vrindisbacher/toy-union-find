@@ -1,11 +1,9 @@
-{-# LANGUAGE BangPatterns #-}
 module Elab (testElab) where
 import Data.HashMap.Strict (lookup, insert, HashMap, empty)
 import Prelude hiding (lookup)
 import Control.Monad.Reader (ReaderT (runReaderT), asks, MonadIO (liftIO))
 import Data.IORef (IORef, atomicModifyIORef', readIORef)
 import GHC.IORef (newIORef)
-import GHC.IO (unsafePerformIO)
 import Union
 
 data Expr = EInt Int
@@ -95,7 +93,6 @@ elabEApp  :: ElabEnv -> Expr -> Expr -> CheckM (Expr, Sort, Expr, Sort, Sort)
 elabEApp f e1 e2 = do
   (e1', s1) <- elab f e1
   (e2', s2) <- elab f e2
-  let !_ = unsafePerformIO $ print ("e1' " ++ show e1' ++ " s1: " ++ show s1 ++ " s2: " ++ show s2)
   (e1'', e2'', s1', s2', s) <- elabAppSort f e1' e2' s1 s2
   return (e1'', s1', e2'', s2', s)
 

@@ -6,7 +6,7 @@ module Union (UF, new, find, union, UFVal(next, unionVals)) where
 import Data.HashMap.Strict (lookup, insert, HashMap, empty)
 import Prelude hiding (lookup)
 
-newtype UF b = MkUF (HashMap Int b)
+newtype UF b = MkUF (HashMap Int b) deriving (Show)
 
 class UFVal b where 
     unionVals :: b -> b -> b 

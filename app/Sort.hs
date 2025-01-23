@@ -1,5 +1,4 @@
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE BangPatterns #-}
 
 module Sort where
@@ -258,6 +257,7 @@ typeCheckExprUF (EApp func arg) = do
             unifyUF sFunc sFuncFresh
             unifyUF sIn sArg
             return sOut
+            
         _ -> error ("Expected function but got: " ++ show sFunc)
 
 resolveUF :: UF Sort -> Sort -> Sort
@@ -279,4 +279,5 @@ typeCheckUF e = do
         ) CheckStateUF { envUF = empty, uf = ufRef, chCount = chCountRef }
     let (result, state) = res
     finalUF <- readIORef (uf state)
+    print result
     return (resolveUF finalUF result)
