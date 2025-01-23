@@ -9,6 +9,7 @@ import Data.IORef
 import Control.Monad.State
     ( MonadIO(liftIO), StateT, evalStateT, MonadState(put, get) )
 import Union 
+import GHC.IO (unsafePerformIO)
 
 data Sort =
     SInt
@@ -193,16 +194,37 @@ freshSFVar = do
 unifyUF :: Sort -> Sort -> CheckUFM ()
 unifyUF SInt SInt = return ()
 unifyUF SFloat SFloat = return ()
-unifyUF (SFVar _) (SFVar _) = return ()
+unifyUF (SFVar i) (SFVar j) = do
+    state <- get
+    let ufRef = uf state
+    let !_ = unsafePerformIO $ print ("union of two vars " ++ show i ++ " " ++ show j)
+    !_ <- liftIO $ atomicModifyIORef' ufRef $ \ufM -> 
+        let newUF = Union.union ufM i (SFVar j) in
+        let !_ = unsafePerformIO $ print ("uf is now " ++ show newUF)
+        in 
+        (newUF, ())
+    return ()
 unifyUF (SFVar i) s = do
     state <- get
     let ufRef = uf state
-    _ <- liftIO $ atomicModifyIORef' ufRef $ \ufM -> (Union.union ufM i s, ())
+    let !_ = unsafePerformIO $ print ("union of var and sort " ++ show i ++ " " ++ show s)
+    !_ <- liftIO $ atomicModifyIORef' ufRef $ \ufM -> 
+        let newUF = Union.union ufM i s in
+        let !_ = unsafePerformIO $ print ("uf is now " ++ show newUF)
+        in 
+        (newUF, ())
+    -- !_ <- liftIO $ atomicModifyIORef' ufRef $ \ufM -> (Union.union ufM i s, ())
     return ()
 unifyUF s (SFVar i) = do
     state <- get
     let ufRef = uf state
-    _ <- liftIO $ atomicModifyIORef' ufRef $ \ufM -> (Union.union ufM i s, ())
+    let !_ = unsafePerformIO $ print ("union of sort and var " ++ show s ++ " " ++ show i)
+    !_ <- liftIO $ atomicModifyIORef' ufRef $ \ufM -> 
+        let newUF = Union.union ufM i s in
+        let !_ = unsafePerformIO $ print ("uf is now " ++ show newUF)
+        in 
+        (newUF, ())
+    -- !_ <- liftIO $ atomicModifyIORef' ufRef $ \ufM -> (Union.union ufM i s, ())
     return ()
 unifyUF (SFunc s1 s2) (SFunc s1' s2') = do
     unifyUF s1 s1'
@@ -227,6 +249,7 @@ typeCheckExprUF (EBind s e1 e2) = do
 typeCheckExprUF (EAdd e1 e2) = do
     !s1 <- typeCheckExprUF e1
     !s2 <- typeCheckExprUF e2
+    let !_ = unsafePerformIO $ print "unifying in EADD"
     unifyUF s1 s2
     return s2
 typeCheckExprUF (ELam s body) = do
@@ -245,25 +268,27 @@ typeCheckExprUF (EApp func arg) = do
     case sFunc of 
         SFunc sIn sOut -> do
             -- make sure sIn and sArg match
+            let !_ = unsafePerformIO $ print "unifying arg in EApp - func case"
             unifyUF sIn sArg
             return sOut
         SFVar _ -> do
-            -- the function is a var and we need to deduce it's type
+            -- the function is a var and we need to infer its type
             xIn <- freshSFVar
             xOut <- freshSFVar
             let sIn = SFVar xIn
             let sOut = SFVar xOut
             let sFuncFresh = SFunc sIn sOut
+            let !_ = unsafePerformIO $ print "unifying function in EApp - var case"
             unifyUF sFunc sFuncFresh
+            let !_ = unsafePerformIO $ print "unifying arg in EApp - var case"
             unifyUF sIn sArg
-            return sOut
-            
+            return sOut 
         _ -> error ("Expected function but got: " ++ show sFunc)
 
 resolveUF :: UF Sort -> Sort -> Sort
-resolveUF ufM (SFVar i) = case find ufM i of 
-    Nothing -> error ("Fvar " ++ show i ++ " not in uf")
-    Just (_, s) -> s
+resolveUF ufM ty@(SFVar i) = case find ufM i of 
+    Nothing -> ty
+    Just (_, s) -> resolveUF ufM s
 resolveUF ufM (SFunc s1 s2) = SFunc (resolveUF ufM s1) (resolveUF ufM s2)
 resolveUF _ SInt = SInt
 resolveUF _ SFloat = SFloat
@@ -279,5 +304,5 @@ typeCheckUF e = do
         ) CheckStateUF { envUF = empty, uf = ufRef, chCount = chCountRef }
     let (result, state) = res
     finalUF <- readIORef (uf state)
-    print result
+    print ("Final uf " ++ show finalUF)
     return (resolveUF finalUF result)

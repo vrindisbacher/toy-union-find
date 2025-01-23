@@ -1,14 +1,16 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE BangPatterns #-}
 
 module Union (UF, new, find, union, UFVal(next, unionVals)) where
 import Data.HashMap.Strict (lookup, insert, HashMap, empty)
 import Prelude hiding (lookup)
+import GHC.IO (unsafePerformIO)
 
 newtype UF b = MkUF (HashMap Int b) deriving (Show)
 
-class UFVal b where 
+class (Show b) => UFVal b where 
     unionVals :: b -> b -> b 
     next :: b -> Maybe Int
 
@@ -26,6 +28,7 @@ union (MkUF ufM) tyv s =
             -- the new one and insert that
             Just (i, s') ->
                 let unified = unionVals s s' in
+                let !_ = unsafePerformIO $ print ("Unified for " ++ show i ++ ": " ++ show s ++ " and " ++ show s' ++ " is " ++ show unified) in
                 MkUF (insert i unified ufM)
 
 find  :: (UFVal b) => UF b -> Int -> Maybe (Int, b)
