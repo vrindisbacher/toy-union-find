@@ -2,9 +2,9 @@ module Main where
 
 import Elab (testElab)
 import Expr (Expr (..))
-import Sort (typeCheck, typeCheckUF, Sort, SortUF)
+import Sort (typeCheck, typeCheckUF, Sort)
 
-check :: Expr -> IO (Sort, SortUF)
+check :: Expr -> IO (Sort, Sort)
 check e = do
     s <- typeCheck e 
     s' <- typeCheckUF e

@@ -162,53 +162,25 @@ typeCheck e = do
 
 -- union find type checking
 
--- Sort that does not use free variables
-data SortUF =
-    SIntUF
-    | SFloatUF
-    | SFuncUF SortUF SortUF
-    | SFVarUF Int
-    deriving (Show, Eq)
-
--- define a type (SortVar ID) to use as keys in union find
--- newtype SortVid = SortVid Int deriving (Eq, Show)
-
--- instance UnifyKey SortVid where
---     index (SortVid i) = i
---     fromIndex = SortVid
-
--- define a type for Sorts to use as values in union find
--- newtype SortUFVal = SortUFVal (Maybe SortUF) deriving (Eq, Show)
-
--- instance UnifyVal SortUFVal where
---     unifyVals :: SortUFVal -> SortUFVal -> SortUFVal
---     unifyVals (SortUFVal Nothing) (SortUFVal Nothing) = SortUFVal Nothing
---     unifyVals (SortUFVal Nothing) s@(SortUFVal (Just _)) = s
---     unifyVals s@(SortUFVal (Just _)) (SortUFVal Nothing)  = s
---     unifyVals s1@(SortUFVal (Just sLeft)) (SortUFVal (Just sRight)) = 
---         if sLeft == sRight then s1 else error ("Failed to unify sorts: " ++ show sLeft ++ " and " ++ show sRight)
-
-
-instance UFVal SortUF where 
+instance UFVal Sort where 
     -- unifyUF :: b -> b -> b 
-    unionVals SIntUF SIntUF = SIntUF
-    unionVals SFloatUF SFloatUF = SFloatUF
-    -- unifyUF (SFVarUF _) (SFVarUF j) = SFVarUF j
-    unionVals (SFVarUF _) s = s
-    unionVals s (SFVarUF _) = s
-    unionVals (SFuncUF s1 s2) (SFuncUF s1' s2') = SFuncUF (unionVals s1 s1') (unionVals s2 s2')
+    unionVals SInt SInt = SInt
+    unionVals SFloat SFloat = SFloat
+    unionVals (SFVar _) s = s
+    unionVals s (SFVar _) = s
+    unionVals (SFunc s1 s2) (SFunc s1' s2') = SFunc (unionVals s1 s1') (unionVals s2 s2')
     unionVals s1 s2 = error ("Cannot unify " ++ show s1 ++ " " ++ show s2)
     next s = case s of 
-        SFVarUF i -> Just i 
+        SFVar i -> Just i 
         _ -> Nothing 
 
 -- State for the checker
-type TypeEnvUF = HashMap String SortUF
+type TypeEnvUF = HashMap String Sort
 
 data CheckStateUF = CheckStateUF {
     chCount :: IORef Int,
     envUF :: TypeEnvUF,
-    uf :: IORef (UF SortUF)
+    uf :: IORef (UF Sort)
 }
 
 type CheckUFM a = StateT CheckStateUF IO a
@@ -219,30 +191,30 @@ freshSFVar = do
   let rn = chCount state
   liftIO $ atomicModifyIORef' rn $ \n -> (n+1, n)
 
-unifyUF :: SortUF -> SortUF -> CheckUFM ()
-unifyUF SIntUF SIntUF = return ()
-unifyUF SFloatUF SFloatUF = return ()
-unifyUF (SFVarUF _) (SFVarUF _) = return ()
-unifyUF (SFVarUF i) s = do
+unifyUF :: Sort -> Sort -> CheckUFM ()
+unifyUF SInt SInt = return ()
+unifyUF SFloat SFloat = return ()
+unifyUF (SFVar _) (SFVar _) = return ()
+unifyUF (SFVar i) s = do
     state <- get
     let ufRef = uf state
     _ <- liftIO $ atomicModifyIORef' ufRef $ \ufM -> (Union.union ufM i s, ())
     return ()
-unifyUF s (SFVarUF i) = do
+unifyUF s (SFVar i) = do
     state <- get
     let ufRef = uf state
     _ <- liftIO $ atomicModifyIORef' ufRef $ \ufM -> (Union.union ufM i s, ())
     return ()
-unifyUF (SFuncUF s1 s2) (SFuncUF s1' s2') = do
+unifyUF (SFunc s1 s2) (SFunc s1' s2') = do
     unifyUF s1 s1'
     unifyUF s2 s2'
     return ()
 unifyUF s1 s2 = error ("Cannot unify " ++ show s1 ++ " " ++ show s2)
 
 
-typeCheckExprUF :: Expr -> CheckUFM SortUF
-typeCheckExprUF (EInt _) = return SIntUF
-typeCheckExprUF (EFloat _) = return SFloatUF
+typeCheckExprUF :: Expr -> CheckUFM Sort
+typeCheckExprUF (EInt _) = return SInt
+typeCheckExprUF (EFloat _) = return SFloat
 typeCheckExprUF (EVar s) = do
     state <- get
     case Data.HashMap.Strict.lookup s (envUF state) of
@@ -262,41 +234,41 @@ typeCheckExprUF (ELam s body) = do
     state <- get
     -- create an input var
     svid <- freshSFVar
-    let sIn = SFVarUF svid
+    let sIn = SFVar svid
     -- bind it in the state
     put state { envUF = insert s sIn (envUF state)}
     -- check the body
     sOut <- typeCheckExprUF body
-    return (SFuncUF sIn sOut)
+    return (SFunc sIn sOut)
 typeCheckExprUF (EApp func arg) = do
     sFunc <- typeCheckExprUF func 
     sArg <- typeCheckExprUF arg
     case sFunc of 
-        SFuncUF sIn sOut -> do
+        SFunc sIn sOut -> do
             -- make sure sIn and sArg match
             unifyUF sIn sArg
             return sOut
-        SFVarUF _ -> do
+        SFVar _ -> do
             -- the function is a var and we need to deduce it's type
             xIn <- freshSFVar
             xOut <- freshSFVar
-            let sIn = SFVarUF xIn
-            let sOut = SFVarUF xOut
-            let sFuncFresh = SFuncUF sIn sOut
+            let sIn = SFVar xIn
+            let sOut = SFVar xOut
+            let sFuncFresh = SFunc sIn sOut
             unifyUF sFunc sFuncFresh
             unifyUF sIn sArg
             return sOut
         _ -> error ("Expected function but got: " ++ show sFunc)
 
-resolveUF :: UF SortUF -> SortUF -> SortUF
-resolveUF ufM (SFVarUF i) = case find ufM i of 
+resolveUF :: UF Sort -> Sort -> Sort
+resolveUF ufM (SFVar i) = case find ufM i of 
     Nothing -> error ("Fvar " ++ show i ++ " not in uf")
     Just (_, s) -> s
-resolveUF ufM (SFuncUF s1 s2) = SFuncUF (resolveUF ufM s1) (resolveUF ufM s2)
-resolveUF _ SIntUF = SIntUF
-resolveUF _ SFloatUF = SFloatUF
+resolveUF ufM (SFunc s1 s2) = SFunc (resolveUF ufM s1) (resolveUF ufM s2)
+resolveUF _ SInt = SInt
+resolveUF _ SFloat = SFloat
 
-typeCheckUF :: Expr -> IO SortUF
+typeCheckUF :: Expr -> IO Sort
 typeCheckUF e = do
     chCountRef <- newIORef 0
     ufRef <- newIORef new
