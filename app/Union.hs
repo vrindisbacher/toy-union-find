@@ -32,6 +32,3 @@ find (MkUF ufM) k = do
     case next s of 
         Nothing -> Just (k, s)
         Just i -> find (MkUF ufM) i
-
--- NOTE: The issue here is that if something has sub sort (e.g. SFunc s1 s2), 
--- s1 and s2 may themselves have
