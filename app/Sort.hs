@@ -11,6 +11,7 @@ import Control.Monad.State
     ( MonadIO(liftIO), StateT, evalStateT, MonadState(put, get) )
 import Union (UF (MkUF), union, find, UFVal (unionVals, next))
 import qualified Union
+import GHC.IO (unsafePerformIO)
 
 data Sort =
     SInt
@@ -150,10 +151,10 @@ typeCheckExpr (EAdd e1 e2) = do
     unify s1 s2
     s1' <- apply s1
     s2' <- apply s2
-    case (s1', s2') of
-        (SInt, SInt) -> return SInt
-        (SFloat, SFloat) -> return SFloat
-        _ -> error ("Type error - expected int, int or float, float, get " ++ show s1' ++ ", " ++ show s2')
+    if s1' == s2' then 
+        return s2' 
+    else 
+        error ("Type error - expected left and right types in addition to be the same but got " ++ show s1' ++ ", " ++ show s2')
 
 typeCheck :: Expr -> IO Sort
 typeCheck e = do
@@ -291,4 +292,5 @@ typeCheckUF e = do
         ) CheckStateUF { envUF = empty, uf = ufRef, chCount = chCountRef }
     let (result, state) = res
     finalUF <- readIORef (uf state)
+    let !_ = unsafePerformIO $ print (show finalUF)
     return (resolveUF finalUF result)

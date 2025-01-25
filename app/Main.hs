@@ -32,3 +32,9 @@ main = do
     let e4 = EApp (ELam "x" body') (EAdd (EFloat 1) (EFloat 2))
     res4 <- check e4
     print res4
+
+    let f1' = ELam "x" (ELam "y" (EAdd (EVar "x") (EVar "y")))
+    let f2' = ELam "f" (ELam "x" (EApp (EApp (EVar "f") (EInt 3)) (EVar "x")))
+    let e1' = EBind "f2" f2' (EApp (EVar "f2") f1')
+    res5 <- check e1'
+    print res5
