@@ -39,6 +39,59 @@ main = do
     res5 <- check e1'
     print res5
 
+    let nestedLambdaTest = EApp 
+            (ELam "f" 
+                (ELam "x" 
+                    (EAdd 
+                        (EApp (EVar "f") (EFloat 1.0))
+                        (EVar "x"))))
+            (ELam "y" (EAdd (EVar "y") (EFloat 2.0)))
+
+    let bindChainTest = EBind "x" (EFloat 1.0)
+            (EBind "y" (EAdd (EVar "x") (EFloat 2.0))
+                (EBind "z" (EAdd (EVar "y") (EFloat 3.0))
+                    (EAdd (EVar "x") (EVar "z"))))
+
+    let higherOrderTest = EApp
+            (ELam "f"
+                (EApp 
+                    (EVar "f")
+                    (EAdd (EFloat 1.0) (EFloat 2.0))))
+            (ELam "x" 
+                (EAdd (EVar "x") (EFloat 3.0)))
+
+    let lambdaChainTest = EApp
+            (EApp
+                (ELam "f"
+                    (ELam "g"
+                        (ELam "x"
+                            (EAdd
+                                (EApp (EVar "f") (EVar "x"))
+                                (EApp (EVar "g") (EVar "x"))))))
+                (ELam "y" (EAdd (EVar "y") (EFloat 1.0))))
+            (ELam "z" (EAdd (EVar "z") (EFloat 2.0)))
+
+    let mixedTypesTest = EBind "x" (EInt 5)
+            (EBind "y" (EFloat 2.5)
+                (EApp
+                    (ELam "z" 
+                        (EAdd 
+                            (EAdd (EVar "z") (EVar "x"))
+                            (EVar "y")))
+                    (EFloat 1.5)))
+
+    -- Test expressions
+    res6 <- check nestedLambdaTest
+    print res6
+    res7 <- check bindChainTest
+    print res7
+    res8 <- check higherOrderTest
+    print res8
+    res9 <- check lambdaChainTest
+    print res9
+    res10 <- check mixedTypesTest
+    print res10
+
     -- (
     --     SFunc 
     --         (SFunc SInt (SFunc (SFVar 4) (SFVar 5)))

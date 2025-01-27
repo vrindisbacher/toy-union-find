@@ -9,9 +9,8 @@ import Data.HashMap.Strict
 import Data.IORef
 import Control.Monad.State
     ( MonadIO(liftIO), StateT, evalStateT, MonadState(put, get) )
-import Union (UF (MkUF), union, find, UFVal (unionVals, next))
+import Union (UF, union, find, UFVal (unionVals, next))
 import qualified Union
-import GHC.IO (unsafePerformIO)
 
 data Sort =
     SInt
@@ -167,16 +166,14 @@ unionFuncArgs :: UF Sort -> Int -> Sort -> Sort -> UF Sort
 unionFuncArgs u i s1 s2 = case (s1, s2) of 
     (SFVar i1, _) -> Union.union u i1 s2
     (_, SFVar i2) -> Union.union u i2 s1
-    (_, _) -> do 
-        let !_ = unsafePerformIO $ print ("Unifying in the default case " ++ show s1 ++ " " ++ show s2)
-        unionVals u i s1 s2
+    (_, _) -> unionVals u i s1 s2
 
 instance UFVal Sort where
     unionVals :: UF Sort -> Int -> Sort -> Sort -> UF Sort
     unionVals ufM _ SInt SInt = ufM
     unionVals ufM _ SFloat SFloat = ufM
     unionVals ufM _ (SFVar j) s = Union.union ufM j s
-    unionVals ufM i s (SFVar j) = Union.union ufM j s
+    unionVals ufM _ s (SFVar j) = Union.union ufM j s
     unionVals u i (SFunc s1 s2) (SFunc s1' s2') = 
         let u' = unionFuncArgs u i s1 s1' in 
             unionFuncArgs u' i s2 s2'
@@ -237,21 +234,18 @@ typeCheckExprUF (EVar s) = do
         Nothing -> error ("oops, var not found: " ++ show s)
 typeCheckExprUF (EBind s e1 e2) = do
     s1 <- typeCheckExprUF e1
-    let !_ = unsafePerformIO $ print ("Putting into env " ++ show s1)
     state <- get
     put state { envUF = insert s s1 (envUF state) }
     typeCheckExprUF e2
 typeCheckExprUF (EAdd e1 e2) = do
     !s1 <- typeCheckExprUF e1
     !s2 <- typeCheckExprUF e2
-    let !_ = unsafePerformIO $ print ("Unifying in EAdd " ++ show s1 ++ " and " ++ show s2)
     unifyUF s1 s2
 typeCheckExprUF (ELam s body) = do
     state <- get
     -- create an input var
     svid <- freshSFVar
     let sIn = SFVar svid
-    let !_ = unsafePerformIO $ print ("Creating input variable in state. for " ++ show s ++ ": " ++ show sIn)
     -- bind it in the state
     put state { envUF = insert s sIn (envUF state)}
     -- check the body
@@ -263,7 +257,6 @@ typeCheckExprUF (EApp func arg) = do
     case sFunc of
         SFunc sIn sOut -> do
             -- make sure sIn and sArg match
-            let !_ = unsafePerformIO $ print ("Unifying in EApp " ++ show sIn ++ " and " ++ show sArg)
             _ <- unifyUF sIn sArg
             return sOut
         SFVar _ -> do
@@ -273,9 +266,7 @@ typeCheckExprUF (EApp func arg) = do
             let sIn = SFVar xIn
             let sOut = SFVar xOut
             let sFuncFresh = SFunc sIn sOut
-            let !_ = unsafePerformIO $ print ("Unifying in EApp " ++ show sFunc ++ " and " ++ show sFuncFresh)
             _ <- unifyUF sFunc sFuncFresh
-            let !_ = unsafePerformIO $ print ("Unifying in EApp " ++ show sIn ++ " and " ++ show sArg)
             _ <- unifyUF sIn sArg
             return sOut
         _ -> error ("Expected function but got: " ++ show sFunc)
@@ -299,5 +290,4 @@ typeCheckUF e = do
         ) CheckStateUF { envUF = empty, uf = ufRef, chCount = chCountRef }
     let (result, state) = res
     finalUF <- readIORef (uf state)
-    let !_ = unsafePerformIO $ print (show finalUF)
     return (resolveUF finalUF result)
