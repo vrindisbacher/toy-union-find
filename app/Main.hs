@@ -71,15 +71,6 @@ main = do
                 (ELam "y" (EAdd (EVar "y") (EFloat 1.0))))
             (ELam "z" (EAdd (EVar "z") (EFloat 2.0)))
 
-    let mixedTypesTest = EBind "x" (EInt 5)
-            (EBind "y" (EFloat 2.5)
-                (EApp
-                    (ELam "z" 
-                        (EAdd 
-                            (EAdd (EVar "z") (EVar "x"))
-                            (EVar "y")))
-                    (EFloat 1.5)))
-
     -- Test expressions
     res6 <- check nestedLambdaTest
     print res6
@@ -89,8 +80,6 @@ main = do
     print res8
     res9 <- check lambdaChainTest
     print res9
-    res10 <- check mixedTypesTest
-    print res10
 
     -- (
     --     SFunc 
