@@ -1,10 +1,12 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE BangPatterns #-}
 
 module Union (UF(MkUF), new, find, union, UFVal(next, unionVals)) where
 import Data.HashMap.Strict (lookup, insert, HashMap, empty)
 import Prelude hiding (lookup)
+import GHC.IO (unsafePerformIO)
 
 newtype UF b = MkUF (HashMap Int b) deriving (Show)
 
@@ -21,10 +23,18 @@ union u@(MkUF ufM) tyv s =
     let tyv_root = find (MkUF ufM) tyv in
     case tyv_root of
             -- if tyv not in union find, insert
-            Nothing -> MkUF (insert tyv s ufM)
+            Nothing -> 
+                let !_ = unsafePerformIO $ print ("Inserting " ++ show tyv ++ " : " ++ show s) in
+                MkUF (insert tyv s ufM)
             -- otherwise, unify the current sort with 
             -- the new one and insert that
-            Just (i, s') -> unionVals u i s s'
+            Just (i, s') -> 
+                let res = unionVals u i s s' in
+                let !_ = unsafePerformIO $ print ("After unifying " ++ show s ++ " and " ++ show s') in 
+                let !_ = unsafePerformIO $ print ("UF " ++ show res) in 
+                res
+                
+                
 
 find  :: (UFVal b) => UF b -> Int -> Maybe (Int, b)
 find (MkUF ufM) k = do

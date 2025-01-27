@@ -164,17 +164,19 @@ typeCheck e = do
 -- union find type checking
 
 unionFuncArgs :: UF Sort -> Int -> Sort -> Sort -> UF Sort 
-unionFuncArgs u i s1 s2 = case (s1 , s2) of 
+unionFuncArgs u i s1 s2 = case (s1, s2) of 
     (SFVar i1, _) -> Union.union u i1 s2
     (_, SFVar i2) -> Union.union u i2 s1
-    (_, _) -> unionVals u i s1 s2
+    (_, _) -> do 
+        let !_ = unsafePerformIO $ print ("Unifying in the default case " ++ show s1 ++ " " ++ show s2)
+        unionVals u i s1 s2
 
 instance UFVal Sort where
     unionVals :: UF Sort -> Int -> Sort -> Sort -> UF Sort
     unionVals ufM _ SInt SInt = ufM
     unionVals ufM _ SFloat SFloat = ufM
-    unionVals (MkUF ufM) i (SFVar _) s = MkUF (insert i s ufM)
-    unionVals (MkUF ufM) i s (SFVar _) = MkUF (insert i s ufM)
+    unionVals ufM _ (SFVar j) s = Union.union ufM j s
+    unionVals ufM i s (SFVar j) = Union.union ufM j s
     unionVals u i (SFunc s1 s2) (SFunc s1' s2') = 
         let u' = unionFuncArgs u i s1 s1' in 
             unionFuncArgs u' i s2 s2'
@@ -200,28 +202,24 @@ freshSFVar = do
   let rn = chCount state
   liftIO $ atomicModifyIORef' rn $ \n -> (n+1, n)
 
-unifyUF :: Sort -> Sort -> CheckUFM ()
-unifyUF SInt SInt = return ()
-unifyUF SFloat SFloat = return ()
-unifyUF (SFVar i) (SFVar j) = do
-    state <- get
-    let ufRef = uf state
-    liftIO $ atomicModifyIORef' ufRef $ \ufM -> (Union.union ufM i (SFVar j), ())
-    return ()
+unifyUF :: Sort -> Sort -> CheckUFM Sort
+unifyUF SInt SInt = return SInt
+unifyUF SFloat SFloat = return SFloat
+unifyUF (SFVar _) s@(SFVar _) = return s
 unifyUF (SFVar i) s = do
     state <- get
     let ufRef = uf state
     liftIO $ atomicModifyIORef' ufRef $ \ufM -> (Union.union ufM i s, ())
-    return ()
+    return s
 unifyUF s (SFVar i) = do
     state <- get
     let ufRef = uf state
     liftIO $ atomicModifyIORef' ufRef $ \ufM -> (Union.union ufM i s, ())
-    return ()
+    return s
 unifyUF (SFunc s1 s2) (SFunc s1' s2') = do
-    unifyUF s1 s1'
-    unifyUF s2 s2'
-    return ()
+    _ <- unifyUF s1 s1'
+    _ <- unifyUF s2 s2'
+    return (SFunc s1 s2)
 unifyUF s1 s2 = error ("Cannot unify " ++ show s1 ++ " " ++ show s2)
 
 
@@ -235,19 +233,21 @@ typeCheckExprUF (EVar s) = do
         Nothing -> error ("oops, var not found: " ++ show s)
 typeCheckExprUF (EBind s e1 e2) = do
     s1 <- typeCheckExprUF e1
+    let !_ = unsafePerformIO $ print ("Putting into env " ++ show s1)
     state <- get
     put state { envUF = insert s s1 (envUF state) }
     typeCheckExprUF e2
 typeCheckExprUF (EAdd e1 e2) = do
     !s1 <- typeCheckExprUF e1
     !s2 <- typeCheckExprUF e2
+    let !_ = unsafePerformIO $ print ("Unifying in EAdd " ++ show s1 ++ " and " ++ show s2)
     unifyUF s1 s2
-    return s2
 typeCheckExprUF (ELam s body) = do
     state <- get
     -- create an input var
     svid <- freshSFVar
     let sIn = SFVar svid
+    let !_ = unsafePerformIO $ print ("Creating input variable in state. for " ++ show s ++ ": " ++ show sIn)
     -- bind it in the state
     put state { envUF = insert s sIn (envUF state)}
     -- check the body
@@ -259,7 +259,8 @@ typeCheckExprUF (EApp func arg) = do
     case sFunc of
         SFunc sIn sOut -> do
             -- make sure sIn and sArg match
-            unifyUF sIn sArg
+            let !_ = unsafePerformIO $ print ("Unifying in EApp " ++ show sIn ++ " and " ++ show sArg)
+            _ <- unifyUF sIn sArg
             return sOut
         SFVar _ -> do
             -- the function is a var and we need to infer its type
@@ -268,8 +269,10 @@ typeCheckExprUF (EApp func arg) = do
             let sIn = SFVar xIn
             let sOut = SFVar xOut
             let sFuncFresh = SFunc sIn sOut
-            unifyUF sFunc sFuncFresh
-            unifyUF sIn sArg
+            let !_ = unsafePerformIO $ print ("Unifying in EApp " ++ show sFunc ++ " and " ++ show sFuncFresh)
+            _ <- unifyUF sFunc sFuncFresh
+            let !_ = unsafePerformIO $ print ("Unifying in EApp " ++ show sIn ++ " and " ++ show sArg)
+            _ <- unifyUF sIn sArg
             return sOut
         _ -> error ("Expected function but got: " ++ show sFunc)
 
