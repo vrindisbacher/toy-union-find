@@ -12,7 +12,7 @@ check e = do
 
 main :: IO ()
 main = do
-    -- testElab
+    testElab
     let f1 = ELam "x" (EAdd (EVar "x") (EInt 3))
     let f2 = ELam "f" (EApp (EVar "f") (EInt 3))
     let e1 = EApp f2 f1

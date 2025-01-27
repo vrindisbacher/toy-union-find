@@ -205,7 +205,11 @@ freshSFVar = do
 unifyUF :: Sort -> Sort -> CheckUFM Sort
 unifyUF SInt SInt = return SInt
 unifyUF SFloat SFloat = return SFloat
-unifyUF (SFVar _) s@(SFVar _) = return s
+unifyUF s1@(SFVar _) (SFVar j) = do 
+    state <- get
+    let ufRef = uf state
+    liftIO $ atomicModifyIORef' ufRef $ \ufM -> (Union.union ufM j s1, ())
+    return s1
 unifyUF (SFVar i) s = do
     state <- get
     let ufRef = uf state
